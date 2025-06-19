@@ -10,12 +10,13 @@ estimate_latent_dimension <- function(Y, k_max){
   svd_Y <- compute_svd(Y, k_max)
   n <- nrow(Y)
   jics <- sapply(1:k_max, function(x) (compute_jic(Y, svd_Y, x)))
-  plot(1:k_max, jics, type='l', xlab='k', ylab='jic', main='')
+  #plot(1:k_max, jics, type='l', xlab='k', ylab='jic', main='')
   print(paste('k_hat = ', which.min(jics)))
   return(list(k_hat = which.min(jics), jics=jics, svd_Y = svd_Y))
 }
 
 compute_jic <- function(Y, svd_Y, k){
+  
   n <- nrow(Y); p <- ncol(Y) 
   minint <- min(n ,p)
   maxint <- max(n, p)
@@ -24,7 +25,7 @@ compute_jic <- function(Y, svd_Y, k){
   
   Y_hat <- tcrossprod(M, Lambda)
   sigma_sq_hat <- colMeans((Y - Y_hat)^2) # p * 1
-  tausq_est <- (mean(colSums((Y_hat)^2) / sigma_sq_hat)) / (n * k);
+  tausq_est <- (mean(colSums((Y_hat)^2) / (sigma_sq_hat+0.00001))) / (n * k);
   
   Lambda_est <- (sqrt(n) / (n + 1/tausq_est)) * svd_Y$v[,1:k] %*% diag(svd_Y$d[1:k], k, k);
   M_Lambda_est <- sqrt(n)* svd_Y$u[,1:k] %*% t(Lambda_est)
@@ -66,6 +67,9 @@ compute_svd <- function(Y, k=10, randomized_svd=F){
 estimate_latent_factors_all_views <- function(Y, ks=NULL, k_max=50){
   M <- length(Y)
   n <- nrow(Y[[1]])
+  if(length(k_max)==1){
+    k_max <- rep(k_max, M)
+  }
   F_tildes <- list()
   Ps <- list() 
   tau_sqs <- c()
@@ -78,7 +82,7 @@ estimate_latent_factors_all_views <- function(Y, ks=NULL, k_max=50){
   for(m in 1:M){
     print(paste0('estimating latent factors for view ', m))
     if(estimate_factors){
-      est_m <- estimate_latent_dimension(Y[[m]], k_max)
+      est_m <- estimate_latent_dimension(Y[[m]], k_max[m])
       ks[m] <- est_m$k_hat
       s_Y_m <- est_m$svd_Y
       print(ks[m])
@@ -159,6 +163,10 @@ fit_FAMA <- function(
   M <- length(Y)
   n <- nrow(Y[[1]])
   ps <- sapply(Y, function(x) ncol(x))
+  
+  if(length(k_max)==1){
+    k_max <- rep(k_max, M)
+  }
   
   ptm <- proc.time()
   factors_est = estimate_latent_factors_all_views(Y, ks, k_max)
@@ -276,115 +284,4 @@ compute_CI_normal_approx <- function(Lambda_1, Lambda_2, SEs, alpha=0.05){
   return(list(u_CI = u_CI, l_CI = l_CI))
 } 
 
-compute_performance_fama <- function(fit, Lambdas_0, As){
-  M <- length(fit$Lambdas_hat)
-  Lambda_hat_c <- do.call(rbind, fit$Lambdas_hat)
-  Lambda_0_c <- Lambdas_0[[1]] %*% t(As[[1]])
-  for(m in 2:M){
-    Lambda_0_c <- rbind(Lambda_0_c, Lambdas_0[[m]] %*% t(As[[m]]))
-  }
-  rmse_all <- norm( ( tcrossprod(Lambda_hat_c) - tcrossprod(Lambda_0_c)), type='F')/norm(tcrossprod(Lambda_0_c), type='F')
-  print('RMSE all')
-  print(rmse_all)
-  rmses_view <- c()
-  rmses_biview <- c()
-  print('RMSE intra-view')
-  for(m in 1:M){
-    print(m)
-    Lambda_hat_outer_s <- tcrossprod(fit$Lambdas_hat[[m]])
-    Lambda_0_outer_s <- tcrossprod(Lambdas_0[[m]])
-    rmses_view[m] <- norm( ( Lambda_hat_outer_s - Lambda_0_outer_s), type='F')/norm(Lambda_0_outer_s, type='F')
-    print(rmses_view[m])
-  }
-  
-  print('RMSE inter-view')
-  for(m in 1:(M-1)){
-    print(m)
-    for(v in (m+1):M) {
-      print(v)
-      Lambda_hat_outer_sv <- fit$Lambdas_hat[[m]] %*% t(fit$Lambdas_hat[[v]])
-      Lambda_0_outer_sv <- Lambdas_0[[m]] %*% t(As[[m]]) %*% As[[v]] %*% t(Lambdas_0[[v]])
-      rmses_biview <- c(rmses_biview, norm( (Lambda_hat_outer_sv - Lambda_0_outer_sv), type='F')/norm(Lambda_0_outer_sv, type='F'))
-      print(rmses_biview[length(rmses_biview)])
-    }
-  }
-  
-  cov_clt_view <- c()
-  cov_clt_biview <- c()
-  len_clt_view <- c()
-  len_clt_biview <- c()
-  print('coverage clt intra-view')
-  for(m in 1:M){
-    print(m)
-    Lambda_0_outer_m <- tcrossprod(Lambdas_0[[m]][subsample_index,])
-    ci_m <- compute_CI_normal_approx(
-      fit$Lambdas_hat[[m]][subsample_index,], fit$Lambdas_hat[[m]][subsample_index,], 
-      fit$clt_SE_intraview[[m]] / sqrt(n), alpha=0.05)
-    cov_clt_view[m] <- mean((ci_m$l_CI<Lambda_0_outer_m) & (ci_m$u_CI>Lambda_0_outer_m))
-    print(cov_clt_view[m])
-    len_clt_view[m] <- mean(ci_m$u_CI - ci_m$l_CI)
-  }
-  print('coverage clt inter-view')
-  for(m in 1:(M-1)){
-    print(m)
-    for(v in (m+1):M) {
-      print(v)
-      Lambda_0_outer_m <- Lambdas_0[[m]][subsample_index,] %*% t(As[[m]]) %*% As[[v]] %*% t(Lambdas_0[[v]][subsample_index,])
-      ci_m <- compute_CI_normal_approx(
-        fit$Lambdas_hat[[m]][subsample_index,], fit$Lambdas_hat[[v]][subsample_index,], 
-        fit$clt_SE_interview[[m]][[v]]$clt_SE / sqrt(n), alpha=0.05)
-      cov_clt_biview <- c(cov_clt_biview, mean((ci_m$l_CI<Lambda_0_outer_m) & 
-                                                 (ci_m$u_CI>Lambda_0_outer_m)))
-      print(cov_clt_biview[length(cov_clt_biview)])
-      len_clt_biview <- c(len_clt_biview, mean(ci_m$u_CI - ci_m$l_CI))
-    }
-  }
-  
-  cov_posterior_view <- c()
-  cov_posterior_biview <- c()
-  len_posterior_view <- c()
-  len_posterior_biview <- c()
-  print('coverage posterior intra-view')
-  for(m in 1:M){
-    print(m)
-    Lambda_0_outer_m <- tcrossprod(Lambdas_0[[m]][subsample_index,])
-    ci_m <- compute_CI_normal_approx(
-      fit$Lambdas_hat[[m]][subsample_index,], fit$Lambdas_hat[[m]][subsample_index,], 
-      fit$posterior_SE_intraview[[m]] / sqrt(n), alpha=0.05)
-    cov_posterior_view[m] <- mean((ci_m$l_CI<Lambda_0_outer_m) & (ci_m$u_CI>Lambda_0_outer_m))
-    print(cov_posterior_view[m])
-    len_posterior_view[m] <- mean(ci_m$u_CI - ci_m$l_CI)
-    
-  }
-  print('coverage posterior inter-view')
-  for(m in 1:(M-1)){
-    print(m)
-    for(v in (m+1):M) {
-      print(v)
-      Lambda_0_outer_m <- Lambdas_0[[m]][subsample_index,] %*% t(As[[m]]) %*% As[[v]] %*% t(Lambdas_0[[v]][subsample_index,])
-      ci_m <- compute_CI_normal_approx(
-        fit$Lambdas_hat[[m]][subsample_index,], fit$Lambdas_hat[[v]][subsample_index,], 
-        fit$posterior_SE_interview[[m]][[v]] / sqrt(n), alpha=0.05)
-      cov_posterior_biview <- c(cov_posterior_biview, mean((ci_m$l_CI<Lambda_0_outer_m) & (ci_m$u_CI>Lambda_0_outer_m)))
-      print(cov_posterior_biview[length(cov_posterior_biview)])
-      len_posterior_biview <- c(len_posterior_biview, mean(ci_m$u_CI - ci_m$l_CI))
-      
-    }
-  }
-  
-  metrics <- list(
-    rmse_all = rmse_all,
-    rmses_intra = rmses_view,
-    rmses_inter = rmses_biview,
-    cov_clt_intra = cov_clt_view,
-    cov_clt_inter = cov_clt_biview,
-    cov_posterior_intra = cov_posterior_view,
-    cov_posterior_inter = cov_posterior_biview,
-    len_clt_intra = len_clt_view,
-    len_clt_inter = len_clt_biview,
-    len_posterior_intra = len_posterior_view,
-    len_posterior_inter = len_posterior_biview
-  )
-  return(metrics)
-}
 
