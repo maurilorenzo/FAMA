@@ -190,10 +190,7 @@ fit_FAMA <- function(
     },
     Y, tau_sqs
   )
-  #sigmas_sq_hat <- mapply(
-  #  compute_posterior_mean_sigmas_sq_m, Y, tau_sqs, Lambdas_hat,
-  #  MoreArgs = list(v_0 = v_0, sigma_sq_0 = sigma_sq_0),
-  #  SIMPLIFY = FALSE) 
+  
   sigmas_sq_hat<-  Map(
     function(y_m, tau_m, mu_m) {
       compute_posterior_mean_sigmas_sq_m(y_m, tau_m, mu_m, v_0, sigma_sq_0)
@@ -202,17 +199,19 @@ fit_FAMA <- function(
   )
   time_model_estimates <- proc.time() - ptm; 
   
-  out = list(Lambdas_hat = Lambdas_hat,  sigmas_sq_hat = sigmas_sq_hat)
+  out = list(Lambdas_hat = Lambdas_hat,  sigmas_sq_hat = sigmas_sq_hat, F_hat = F_hat)
   out$k_0_hat = k_0_hat
+  out$taus <- tau_sqs
   out$time_model_estimates = time_model_estimates[3]
   if((! clt_SE) & (! posterior_SE) ){
     return(out)
   }
   
-  if(is.vector(index_SE)){
+  if(!is.list(index_SE)){
     index_SE <- replicate(M, index_SE, simplify = FALSE)
   }
   for(m in 1:M){
+    
     if(max(index_SE[[m]])>ps[m]){
       index_SE[[m]] = 1:ps[m]
     }
@@ -234,7 +233,7 @@ fit_FAMA <- function(
       }
     }
     clt_SE_intraview[[M]] = compute_sds_clt_intraview(
-      Lambdas_hat[[M]][index_SE[[m]],], sigmas_sq_hat[[M]][index_SE[[m]]])
+      Lambdas_hat[[M]][index_SE[[M]],], sigmas_sq_hat[[M]][index_SE[[M]]])
     out$clt_SE_intraview = clt_SE_intraview
     out$clt_SE_interview = clt_SE_interview
   }
@@ -250,10 +249,18 @@ fit_FAMA <- function(
     }
     out$rhos = rhos
     for(m in 1:(M-1)){
+      print(m)
       posterior_SE_intraview[[m]] = compute_sds_posterior_distribution_intraview(
         Lambdas_hat[[m]][index_SE[[m]],], sigmas_sq_hat[[m]][index_SE[[m]]], rhos[m])
       posterior_SE_interview[[m]] = list()
       for(l in (m+1):M){
+        print(l)
+        print(dim(Lambdas_hat[[m]]))
+        print(length(sigmas_sq_hat[[m]]))
+        print(index_SE[[m]])
+        print(dim(Lambdas_hat[[l]]))
+        print(length(sigmas_sq_hat[[l]]))
+        print(index_SE[[l]])
         posterior_SE_interview[[m]][[l]] =  compute_sds_posterior_distribution_biview(
           Lambdas_hat[[m]][index_SE[[m]],], Lambdas_hat[[l]][index_SE[[l]],], 
           sigmas_sq_hat[[m]][index_SE[[m]]], sigmas_sq_hat[[l]][index_SE[[l]]],
@@ -261,7 +268,7 @@ fit_FAMA <- function(
       }
     }
     posterior_SE_intraview[[M]] = compute_sds_posterior_distribution_intraview(
-      Lambdas_hat[[M]][index_SE[[m]],], sigmas_sq_hat[[M]][index_SE[[m]]])
+      Lambdas_hat[[M]][index_SE[[M]],], sigmas_sq_hat[[M]][index_SE[[M]]])
     out$posterior_SE_intraview = posterior_SE_intraview
     out$posterior_SE_interview = posterior_SE_interview
   }
@@ -284,4 +291,109 @@ compute_CI_normal_approx <- function(Lambda_1, Lambda_2, SEs, alpha=0.05){
   return(list(u_CI = u_CI, l_CI = l_CI))
 } 
 
+posterior_samples_view_m <- function(
+    Y_m, F_hat, Lambda_hat, tau_m, rho_m, sigma_sq_0 = 1, v_0 = 1, n_MC=500){
+  n <- nrow(Y_m)
+  p <- nrow(Lambda_hat)
+  k <- ncol(Lambda_hat)
+  v_n <- n + v_0
+  SSE <- colSums((Y_m - F_hat %*% t(Lambda_hat))^2)
+  SST <- SSE + sigma_sq_0 * v_0
+  sigmas_sq_samples <- sapply(SST, function(x) 
+    (1 / rgamma(n_MC, v_n / 2, SST)))
+  Lambda_samples <- array(NA, dim=c(p, k, n_MC))
+  for(t in 1:n_MC){
+    Lambda_samples[,,t] <- Lambda_hat +
+      rho_m *  diag(as.vector(sqrt(sigmas_sq_samples[t,]) / (sqrt(n + 1/tau_m)))) %*%
+                                matrix(rnorm(k * p), ncol=k) 
+      
+  }
+  
+  return(list(
+    Lambda_samples = Lambda_samples,
+    sigmas_sq_samples = sigmas_sq_samples
+    )
+  )
+}
+
+posterior_samples_all_views <- function(
+    Y, F_hat, Lambdas_hat, taus, rhos, sigma_sq_0 = 1, v_0 = 1, n_MC=500
+){
+  M <- length(Y)
+  posterior_samples <- list()
+  for(m in 1:M){
+    posterior_samples[[m]] <- posterior_samples_view_m(
+      Y[[m]], F_hat, Lambdas_hat[[m]], taus[m], rhos[m], sigma_sq_0, v_0, n_MC)
+  }
+  return(posterior_samples)
+}
+
+covariance_intraview_posterior_samples_view_m <- function(Lambda_samples, sigmas_sq_samples, cor=T){
+  p <- dim(Lambda_samples)[1]
+  n_MC <- dim(Lambda_samples)[3]
+  
+  out <- array(NA, dim=c(p,p, n_MC))
+  for(t in 1:n_MC){
+    out_t <- tcrossprod(Lambda_samples[,,t]) + diag(as.vector(sigmas_sq_samples[t,]))
+    if(cor){
+      vars <- diag(out_t)
+      out_t <- diag(as.vector(1 / sqrt(vars))) %*% out_t %*% diag(as.vector(1 / sqrt(vars)))
+    }
+    out[,,t] <- out_t
+  }
+  return(out)
+}
+
+covariance_intraview_posterior_samples_all_views <- function(posterior_samples, cor=T){
+  M <- length(posterior_samples)
+  out <- list()
+  for(m in 1:M){
+    Lambda_samples <- posterior_samples[[m]]$Lambda_samples
+    sigmas_sq_samples <- posterior_samples[[m]]$sigmas_sq_samples
+    out[[m]] <- covariance_intraview_posterior_samples_view_m(
+      Lambda_samples, sigmas_sq_samples, cor
+      )
+  }
+  return(out)
+}
+
+covariance_interview_posterior_samples_biview <- function(
+    Lambda_1_samples, Lambda_2_samples, 
+    sigmas_sq_1_samples, sigmas_sq_2_samples, cor=T){
+  p_1 <- dim(Lambda_1_samples)[1]
+  p_2 <- dim(Lambda_2_samples)[1]
+  n_MC <- dim(Lambda_1_samples)[3]
+  
+  
+  out <- array(NA, dim=c(p_1, p_2, n_MC))
+  for(t in 1:n_MC){
+    out_t <- tcrossprod(Lambda_1_samples[,,t], Lambda_2_samples[,,t])
+    if(cor){
+      vars_1 <- rowSums(Lambda_1_samples[,,t]^2) + sigmas_sq_1_samples[t,]
+      vars_2 <- rowSums(Lambda_2_samples[,,t]^2) + sigmas_sq_2_samples[t,]
+      out_t <- diag(as.vector(1 / sqrt(vars_1))) %*% out_t %*% diag(as.vector(1 / sqrt(vars_2)))
+    }
+    out[,,t] <- out_t
+  }
+  return(out)
+}
+
+covariance_interview_posterior_samples_all_views <- function(
+    posterior_samples, cor=T){
+  M <- length(posterior_samples)
+  out <- list()
+  for(m in 1:(M-1)){
+    out[[m]] <- list()
+    Lambda_m_samples <- posterior_samples[[m]]$Lambda_samples
+    sigmas_sq_m_samples <- posterior_samples[[m]]$sigmas_sq_samples
+    for(l in (m+1):M){
+      Lambda_l_samples <- posterior_samples[[l]]$Lambda_samples
+      sigmas_sq_l_samples <- posterior_samples[[l]]$sigmas_sq_samples
+      out[[m]][[l]] <- covariance_interview_posterior_samples_biview(
+        Lambda_m_samples, Lambda_l_samples, sigmas_sq_m_samples, sigmas_sq_l_samples, cor
+        )
+    }
+  }
+  return(out)
+}
 

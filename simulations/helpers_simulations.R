@@ -1,12 +1,16 @@
 #remotes::install_github("shounakch/FABLE")
 library(FABLE)
 
+# BiocManager::install("MOFA2")
 library(MOFA2)
 library(reticulate)
-use_python("C:/Users/mauri/AppData/Local/Programs/Python/Python312", required=TRUE)
+#use_python("C:/Users/mauri/AppData/Local/Programs/Python/Python312", required=TRUE)
 outfile = file.path('results',"mofa_fit_1.hdf5")
 
 source('competitors/FACTOR_ANALYSIS/FACTOR_CODE_update.R')
+
+source('competitors/fable.R')
+
 
 prepare_data_4_mofa <- function(Y){
   V <- length(Y)
@@ -110,75 +114,12 @@ compute_performance_mofa <- function(fit, Lambdas_0, As){
 
 
 
-
-PseudoPosteriorSampler <- function(fit,
-                                   Y,
-                                   gamma0 = 1,
-                                   delta0sq = 1,
-                                   maxProp = 0.5,
-                                   MC = 1000) {
-  
-  tFABLESample1 = proc.time()
-  
-  Y = as.matrix(Y)
-  n = nrow(Y)
-  p = ncol(Y)
-  svdY = svd(Y)
-  U_Y = svdY$u
-  V_Y = svdY$v
-  svalsY = svdY$d
-  #kMax = min(which(cumsum(svalsY) / sum(svalsY) >= maxProp))
-  kEst = fit$estRank
-  
-  FABLEHypPars = FABLEHyperParameters(Y,
-                                      U_Y,
-                                      V_Y,
-                                      svalsY,
-                                      kEst,
-                                      gamma0,
-                                      delta0sq)
-  
-  CovCorrectMatrix = cov_correct_matrix(FABLEHypPars$SigmaSqEstimate, 
-                                        FABLEHypPars$G)
-  
-  varInflation = (sum(CovCorrectMatrix) / (p*(p+1)/2))^2
-  
-  FABLESamples = FABLESampler(Y, 
-                              gamma0, 
-                              delta0sq, 
-                              MC,
-                              U_Y,
-                              V_Y,
-                              svalsY,
-                              kEst,
-                              FABLEHypPars$tauSqEstimate,
-                              FABLEHypPars$gammaDeltasq,
-                              FABLEHypPars$G0,
-                              varInflation)
-  
-  tFABLESample2 = proc.time()
-  tSample = (tFABLESample2 - tFABLESample1)[3]
-  
-  OutputList = list("CCFABLESamples" = FABLESamples,
-                    "FABLEHyperParameters" = FABLEHypPars,
-                    "svdY" = svdY,
-                    "estRank" = kEst,
-                    "varInflation" = varInflation,
-                    "runTime" = tSample)
-  
-  return(OutputList)
-  
-}
-
-
-
-
 compute_performance_fable <- function(
     fit, Y, Lambdas_0, As, n_MC = 500, subsample_index=1:100, UQ=T
     ){
   Y_c <- do.call(cbind, Y)
   M <- length(Lambdas_0)
-  Lambda_outer_hat_fable <- fit$FABLEPostMean
+  Lambda_outer_hat_fable <- fit$Lambda_outer
   Lambda_0_c <- Lambdas_0[[1]] %*% t(As[[1]])
   for(m in 2:M){
     Lambda_0_c <- rbind(Lambda_0_c, Lambdas_0[[m]] %*% t(As[[m]]))
@@ -237,7 +178,7 @@ compute_performance_fable <- function(
   
   
   ptm <- proc.time()
-  post_samples_fable <- PseudoPosteriorSampler(fable_fit_1, Y_c[,subsample_index_c], MC = n_MC) 
+  post_samples_fable <- PseudoPosteriorSampler_2(fable_fit_1, Y_c[,subsample_index_c], MC = n_MC) 
   
   fable_qs <- CCFABLEPostProcessing(post_samples_fable$CCFABLESamples,
                                     alpha=0.05)
@@ -255,9 +196,10 @@ compute_performance_fable <- function(
   for(m in 1:M){
     print(m)
     Lambda_0_outer_m <- tcrossprod(Lambdas_0[[m]][subsample_index,])
-    l_ci <- fable_l[(idx_start + subsample_index), (idx_start + subsample_index)]
-    u_ci <- fable_u[(idx_start + subsample_index), (idx_start + subsample_index)]
-    cov_posterior_view[m] <- mean((l_ci<Lambda_0_outer_m) & (u_ci>Lambda_0_outer_m))
+    Lambda_0_outer_m_vec <- Lambda_0_outer_m[lower.tri(Lambda_0_outer_m, diag = FALSE)]
+    l_ci <- fable_l[(idx_start + subsample_index), (idx_start + subsample_index)][lower.tri(Lambda_0_outer_m, diag = FALSE)]
+    u_ci <- fable_u[(idx_start + subsample_index), (idx_start + subsample_index)][lower.tri(Lambda_0_outer_m, diag = FALSE)]
+    cov_posterior_view[m] <- mean((l_ci<Lambda_0_outer_m_vec) & (u_ci>Lambda_0_outer_m_vec))
     print(cov_posterior_view[m])
     len_posterior_view[m] <- mean(u_ci - l_ci)
     idx_start <- idx_start + length(subsample_index)
@@ -297,6 +239,126 @@ compute_performance_fable <- function(
   )
 }
 
+compute_performance_fama <- function(fit, Lambdas_0, As){
+  M <- length(fit$Lambdas_hat)
+  Lambda_hat_c <- do.call(rbind, fit$Lambdas_hat)
+  Lambda_0_c <- Lambdas_0[[1]] %*% t(As[[1]])
+  for(m in 2:M){
+    Lambda_0_c <- rbind(Lambda_0_c, Lambdas_0[[m]] %*% t(As[[m]]))
+  }
+  rmse_all <- norm( ( tcrossprod(Lambda_hat_c) - tcrossprod(Lambda_0_c)), type='F')/norm(tcrossprod(Lambda_0_c), type='F')
+  print('RMSE all')
+  print(rmse_all)
+  rmses_view <- c()
+  rmses_biview <- c()
+  print('RMSE intra-view')
+  for(m in 1:M){
+    print(m)
+    Lambda_hat_outer_s <- tcrossprod(fit$Lambdas_hat[[m]])
+    Lambda_0_outer_s <- tcrossprod(Lambdas_0[[m]])
+    rmses_view[m] <- norm( ( Lambda_hat_outer_s - Lambda_0_outer_s), type='F')/norm(Lambda_0_outer_s, type='F')
+    print(rmses_view[m])
+  }
+  
+  print('RMSE inter-view')
+  for(m in 1:(M-1)){
+    print(m)
+    for(v in (m+1):M) {
+      print(v)
+      Lambda_hat_outer_sv <- fit$Lambdas_hat[[m]] %*% t(fit$Lambdas_hat[[v]])
+      Lambda_0_outer_sv <- Lambdas_0[[m]] %*% t(As[[m]]) %*% As[[v]] %*% t(Lambdas_0[[v]])
+      rmses_biview <- c(rmses_biview, norm( (Lambda_hat_outer_sv - Lambda_0_outer_sv), type='F')/norm(Lambda_0_outer_sv, type='F'))
+      print(rmses_biview[length(rmses_biview)])
+    }
+  }
+  
+  cov_clt_view <- c()
+  cov_clt_biview <- c()
+  len_clt_view <- c()
+  len_clt_biview <- c()
+  print('coverage clt intra-view')
+  for(m in 1:M){
+    print(m)
+    Lambda_0_outer_m <- tcrossprod(Lambdas_0[[m]][subsample_index,])
+    Lambda_0_outer_m_vec <- Lambda_0_outer_m[lower.tri(Lambda_0_outer_m, diag = FALSE)]
+    ci_m <- compute_CI_normal_approx(
+      fit$Lambdas_hat[[m]][subsample_index,], fit$Lambdas_hat[[m]][subsample_index,], 
+      fit$posterior_SE_intraview[[m]] / sqrt(n), alpha=0.05)
+    cov_clt_view[m] <- mean((ci_m$l_CI[lower.tri(Lambda_0_outer_m, diag = FALSE)]<Lambda_0_outer_m_vec) &
+                                    (ci_m$u_CI[lower.tri(Lambda_0_outer_m, diag = FALSE)]>Lambda_0_outer_m_vec))
+    print(cov_clt_view[m])
+    len_clt_view[m] <- mean(ci_m$u_CI[lower.tri(Lambda_0_outer_m, diag = FALSE)] - ci_m$l_CI[lower.tri(Lambda_0_outer_m, diag = FALSE)])
+    
+  }
+  print('coverage clt inter-view')
+  for(m in 1:(M-1)){
+    print(m)
+    for(v in (m+1):M) {
+      print(v)
+      Lambda_0_outer_m <- Lambdas_0[[m]][subsample_index,] %*% t(As[[m]]) %*% As[[v]] %*% t(Lambdas_0[[v]][subsample_index,])
+      ci_m <- compute_CI_normal_approx(
+        fit$Lambdas_hat[[m]][subsample_index,], fit$Lambdas_hat[[v]][subsample_index,], 
+        fit$clt_SE_interview[[m]][[v]]$clt_SE / sqrt(n), alpha=0.05)
+      cov_clt_biview <- c(cov_clt_biview, mean((ci_m$l_CI<Lambda_0_outer_m) & 
+                                                 (ci_m$u_CI>Lambda_0_outer_m)))
+      print(cov_clt_biview[length(cov_clt_biview)])
+      len_clt_biview <- c(len_clt_biview, mean(ci_m$u_CI - ci_m$l_CI))
+    }
+  }
+  
+  cov_posterior_view <- c()
+  cov_posterior_biview <- c()
+  len_posterior_view <- c()
+  len_posterior_biview <- c()
+  print('coverage posterior intra-view')
+  for(m in 1:M){
+    print(m)
+    Lambda_0_outer_m <- tcrossprod(Lambdas_0[[m]][subsample_index,])
+    Lambda_0_outer_m_vec <- Lambda_0_outer_m[lower.tri(Lambda_0_outer_m, diag = FALSE)]
+    
+    ci_m <- compute_CI_normal_approx(
+      fit$Lambdas_hat[[m]][subsample_index,], fit$Lambdas_hat[[m]][subsample_index,], 
+      fit$posterior_SE_intraview[[m]] / sqrt(n), alpha=0.05)
+    cov_posterior_view[m] <- mean((ci_m$l_CI[lower.tri(Lambda_0_outer_m, diag = FALSE)]<Lambda_0_outer_m_vec) & 
+                                    (ci_m$u_CI[lower.tri(Lambda_0_outer_m, diag = FALSE)]>Lambda_0_outer_m_vec))
+    print(cov_posterior_view[m])
+    len_posterior_view[m] <- mean(ci_m$u_CI[lower.tri(Lambda_0_outer_m, diag = FALSE)] - ci_m$l_CI[lower.tri(Lambda_0_outer_m, diag = FALSE)])
+    
+  }
+  
+  print('coverage posterior inter-view')
+  for(m in 1:(M-1)){
+    print(m)
+    for(v in (m+1):M) {
+      print(v)
+      Lambda_0_outer_m <- Lambdas_0[[m]][subsample_index,] %*% t(As[[m]]) %*% As[[v]] %*% t(Lambdas_0[[v]][subsample_index,])
+      ci_m <- compute_CI_normal_approx(
+        fit$Lambdas_hat[[m]][subsample_index,], fit$Lambdas_hat[[v]][subsample_index,], 
+        fit$posterior_SE_interview[[m]][[v]] / sqrt(n), alpha=0.05)
+      cov_posterior_biview <- c(cov_posterior_biview, mean((ci_m$l_CI<Lambda_0_outer_m) & (ci_m$u_CI>Lambda_0_outer_m)))
+      print(cov_posterior_biview[length(cov_posterior_biview)])
+      len_posterior_biview <- c(len_posterior_biview, mean(ci_m$u_CI - ci_m$l_CI))
+      
+    }
+  }
+  
+  metrics <- list(
+    rmse_all = rmse_all,
+    rmses_intra = rmses_view,
+    rmses_inter = rmses_biview,
+    cov_clt_intra = cov_clt_view,
+    cov_clt_inter = cov_clt_biview,
+    cov_posterior_intra = cov_posterior_view,
+    cov_posterior_inter = cov_posterior_biview,
+    len_clt_intra = len_clt_view,
+    len_clt_inter = len_clt_biview,
+    len_posterior_intra = len_posterior_view,
+    len_posterior_inter = len_posterior_biview
+  )
+  return(metrics)
+}
+
+
 
 
 fit_rotate <- function(Y_c, k=10, lambda0=5){
@@ -310,7 +372,7 @@ fit_rotate <- function(Y_c, k=10, lambda0=5){
   rotate_fit <- FACTOR_ROTATE(
     Y_c, lambda0, lambda1, start, K, epsilon, alpha,TRUE,TRUE,100,TRUE
     )
-  rotate_fit$FABLEPostMean <- tcrossprod(rotate_fit$B)
+  rotate_fit$Lambda_outer <- tcrossprod(rotate_fit$B)
   return(rotate_fit)
 }
 

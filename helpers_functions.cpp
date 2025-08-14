@@ -83,7 +83,7 @@ arma::mat compute_sds_posterior_distribution_biview(
     const double rho_1=1, const double rho_2=1 
 ){
   arma::vec Lambda_1_inner_prods = arma::sum(arma::square(Lambda_1), 1); 
-  arma::vec Lambda_2_inner_prods = arma::sum(arma::square(Lambda_1), 1); 
+  arma::vec Lambda_2_inner_prods = arma::sum(arma::square(Lambda_2), 1); 
   
   int p_1 = Lambda_1.n_rows; 
   int p_2 = Lambda_2.n_rows; 

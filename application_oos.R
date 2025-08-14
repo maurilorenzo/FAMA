@@ -88,9 +88,9 @@ dim(rppa_data)
 
 num_genes <- 4000
 
-gene_variances <- apply(rna_hs_data, 1, var)
-top4000_indices <- order(gene_variances, decreasing = TRUE)[1:num_genes]
-rna_hs_top4000 <- rna_hs_data[top4000_indices,]
+#gene_variances <- apply(rna_hs_data, 1, var)
+#top4000_indices <- order(gene_variances, decreasing = TRUE)[1:num_genes]
+#rna_hs_top4000 <- rna_hs_data[top4000_indices,]
 
 gene_variances <- apply(rna_ga_data, 1, var)
 top4000_indices <- order(gene_variances, decreasing = TRUE)[1:num_genes]
@@ -151,8 +151,6 @@ if (all(!na_check)) {
   print(names(na_check)[na_check])
 }
 
-sum(is.na(Y_train[[3]]))
-sum(abs(Y_train[[3]]) == Inf)
 
 set.seed(99) 
 n <- nrow(Y[[1]])

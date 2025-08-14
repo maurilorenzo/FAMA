@@ -1,7 +1,6 @@
 
 source('simulations/helpers_simulations.R')
 source('FAMA_wrapper.R')
-#source('competitors/FACTOR_ANALYSIS/FACTOR_CODE_update.R')
 
 library(LaplacesDemon)
 library(MASS)
@@ -30,8 +29,8 @@ if(scenario == 1 | scenario == 2){
 }
 
 
-scenario <- 3
-if(scenario == 3 | scenario == 4){
+scenario <- 11
+if(scenario == 3 | scenario == 4 | scenario == 11){
   k <- 30
   k_1 <- 20
   M <- 4
@@ -44,7 +43,46 @@ if(scenario == 3 | scenario == 4){
   if(scenario == 4){
     n <- 1000
   }
+  if(scenario == 11){
+    n <- 150
+  }
 }
+
+
+if(scenario == 5 | scenario == 6){
+  k <- 30
+  k_1 <- 20
+  M <- 4
+  k_tildes <- rep(k_1, M)
+  p_s <- rep(1000, M)
+  sigmas <- rep(0.5, M)
+  sigmas_l <- rep(5, M)
+  sigmas_u <- rep(10, M)
+  n <- 500
+  if(scenario == 6){
+    n <- 1000
+  }
+}
+
+scenario <- 9
+if(scenario == 7 | scenario == 8 | scenario == 9){
+  k <- 30
+  k_1 <- 20
+  M <- 4
+  k_tildes <- rep(k_1, M)
+  p_s <- rep(2000, M)
+  sigmas <- rep(0.5, M)
+  sigmas_l <- rep(5, M)
+  sigmas_u <- rep(10, M)
+  n <- 500
+  if(scenario == 8){
+    n <- 1000
+  }
+  if(scenario == 9){
+    n <- 150
+  }
+}
+
 
 
 
@@ -97,9 +135,8 @@ for(sim in 1:n_sim){
     Sigmas_0[[m]] <- runif(p_s[m], sigmas_l[m], sigmas_u[m])
     boxplot(diag(Lambdas_0_outer[[m]]) / Sigmas_0[[m]])
     
-    Y[[m]] <- Eta_0 %*% As[[m]] %*% t(Lambdas_0[[m]])+ #  Phis_0[[m]] %*% t(Gammas_0[[m]]) + 
+    Y[[m]] <- Eta_0 %*% As[[m]] %*% t(Lambdas_0[[m]])+  
       +matrix(rnorm(p_s[m] * n, 0 , 1), nrow=n) %*%  diag(sqrt(Sigmas_0[[m]]))
-    #mvrnorm(n, rep(0,p_s[m]), Sigmas_0[[m]])
   }
   
   if(fama){
@@ -113,12 +150,13 @@ for(sim in 1:n_sim){
     Y_c <- do.call(cbind, Y)
     set.seed(123)
     ptm <- proc.time() 
-    fable_fit_1 <- PseudoPosteriorMean(Y_c, gamma0 = 1, delta0sq = 1, maxProp = 0.95)
+    fable_fit_1 <- PseudoPosteriorMean_2(Y_c, gamma0 = 1, delta0sq = 1, maxProp = 0.95)
     fable_time <- proc.time() - ptm
     fable_fit_1_metrics <- compute_performance_fable(fable_fit_1, Y, Lambdas_0, As, n_MC = 500, subsample_index=1:100)
     fable_results <- rbind(fable_results, c(unlist(fable_fit_1_metrics),  fable_fit_1$estRank, fable_time[3]))
     names(fable_results) <- c(names(unlist(fable_fit_1_metrics)), 'k_0_hat', 'time_pe')
   }
+  
   if(mofa){
     set.seed(123)
     ptm <- proc.time() 
@@ -129,6 +167,7 @@ for(sim in 1:n_sim){
     mofa_results <- rbind(mofa_results, c(unlist(mofa_fit_1_metrics),  mofa_time[3]))
     names(mofa_results) <- c(names(unlist(mofa_fit_1_metrics)), 'time_pe')
   }
+  
   
   if(rotate){
     Y_c <- do.call(cbind, Y)
@@ -157,24 +196,32 @@ library(ggplot2)
 library(purrr)
 library(patchwork)
 
-# Add method column to each data frame
+
+#scenario <- 8
+
+fama_results <- read.csv(paste0('simulations/results/scenario_', scenario, '/fama_results.csv'))
+fable_results <- read.csv(paste0('simulations/results/scenario_', scenario, '/fable_results.csv'))
+rotate_results <- read.csv(paste0('simulations/results/scenario_', scenario, '/rotate_results.csv'))
+mofa_results <- read.csv(paste0('simulations/results/scenario_', scenario, '/mofa_results.csv'))
+
 fama_results <- fama_results %>% mutate(method = "FAMA")
 fable_results <- fable_results %>% mutate(method = "FABLE")
 mofa_results <- mofa_results %>% mutate(method = "MOFA")
 rotate_results <- rotate_results %>% mutate(method = "ROTATE")
 
-# Combine all results
 all_results <- bind_rows(fama_results, fable_results, mofa_results, rotate_results)
+all_results$method <- factor(all_results$method, levels = c("FAMA", "FABLE", "MOFA", "ROTATE"))
+#all_results <- bind_rows(fama_results, fable_results, rotate_results)
 
-# 1st tab: Boxplot of rmse_all
+
 p1 <- ggplot(all_results, aes(x = method, y = rmse_all, fill = method)) +
   geom_boxplot() +
   theme_minimal() +
-  labs(title = "RMSE Overall", y = "RMSE", x = "") +
+  labs(title = "RMSE Overall", y = "RMSE", x = "Method") +
   theme(legend.position = "none")
 
 intra_data <- all_results %>%
-  select(method, starts_with("rmses_intra")) %>%
+  dplyr::select(method, starts_with("rmses_intra")) %>%
   pivot_longer(cols = starts_with("rmses_intra"), names_to = "metric", values_to = "value")
 
 p2 <- ggplot(intra_data, aes(x = method, y = value, fill = method)) +
@@ -184,7 +231,7 @@ p2 <- ggplot(intra_data, aes(x = method, y = value, fill = method)) +
   theme(legend.position = "none")
 
 inter_data <- all_results %>%
-  select(method, starts_with("rmses_inter")) %>%
+  dplyr::select(method, starts_with("rmses_inter")) %>%
   pivot_longer(cols = starts_with("rmses_inter"), names_to = "metric", values_to = "value")
 
 p3 <- ggplot(inter_data, aes(x = method, y = value, fill = method)) +
@@ -196,13 +243,92 @@ p3 <- ggplot(inter_data, aes(x = method, y = value, fill = method)) +
 p4 <- ggplot(all_results, aes(x = method, y = time_pe, fill = method)) +
   geom_boxplot() +
   theme_minimal() +
-  labs(title = "Computation Time", x = "", y = "Seconds") +
+  labs(title = "Running Time", x = "Method", y = "Seconds") +
   theme(legend.position = "none")
 
+
+dev.new()
 (p1 / p2 / p3 / p4) + plot_layout(ncol = 4)
 
 
 
 write.csv(all_results, paste0('simulations/results/scenario_', scenario, '/all_results.csv'))
+
+rbind(colMeans(fama_results[ , grepl("len", names(fama_results))]),
+rep(colMeans(fable_results[ , grepl("len", names(fable_results))]),2))
+
+colMeans(fama_results)
+colMeans(fable_results)
+
+
+coverage_fama <- fama_results[ , grepl("cov", names(fama_results))]
+coverage_fama_clt <- coverage_fama[ , grepl("clt", names(coverage_fama))]
+coverage_fama_bvm <- coverage_fama[ , grepl("posterior", names(coverage_fama))]
+
+coverage_fable <- fable_results[ , grepl("cov", names(fable_results))]
+
+coverage_fama_clt[] <- lapply(coverage_fama_clt, as.double)
+coverage_fama_bvm[] <- lapply(coverage_fama_bvm, as.double)
+coverage_fable[] <- lapply(coverage_fable, as.double)
+
+# intra 
+coverage_fama_clt_intra <- coverage_fama_clt[ , grepl("intra", names(coverage_fama_clt))]
+coverage_fama_bvm_intra <- coverage_fama_bvm[ , grepl("intra", names(coverage_fama_bvm))]
+coverage_fable_intra <- coverage_fable[ , grepl("intra", names(coverage_fable))]
+
+mean(colMeans(coverage_fama_clt_intra));
+mean(colMeans(coverage_fama_bvm_intra));
+mean(colMeans(coverage_fable_intra));
+
+
+# inter 
+coverage_fama_clt_inter <- coverage_fama_clt[ , grepl("inter", names(coverage_fama_clt))]
+coverage_fama_bvm_inter <- coverage_fama_bvm[ , grepl("inter", names(coverage_fama_bvm))]
+coverage_fable_inter <- coverage_fable[ , grepl("inter", names(coverage_fable))]
+
+mean(colMeans(coverage_fama_clt_inter));
+mean(colMeans(coverage_fama_bvm_inter));
+mean(colMeans(coverage_fable_inter))
+
+
+scenario
+mean(colMeans(coverage_fama_clt_intra));
+mean(colMeans(coverage_fama_bvm_intra));
+mean(colMeans(coverage_fable_intra));
+mean(colMeans(coverage_fama_clt_inter));
+mean(colMeans(coverage_fama_bvm_inter));
+mean(colMeans(coverage_fable_inter))
+
+# to do
+
+# scenario 3
+# coverage + plot
+
+# scenario 4
+# run mofa
+# plot
+
+# scenario 7
+# run mofa
+# coverage + plot
+
+# scenario 8
+# run mofa
+# plot
+
+
+# scenario 5
+# run mofa
+# coverage + plot
+
+# scenario 6
+# all
+
+# scenario 9
+# all
+
+# scenario 10
+# all
+
 
 
