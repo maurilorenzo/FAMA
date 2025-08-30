@@ -1,8 +1,8 @@
 
-#load('application/results/oos_2.RData')
+source('simulations/helpers_simulations.R')
+source('FAMA_wrapper.R')
 
 file_urls <- c(
-  #Clinical     = "https://linkedomics.org/data_download/TCGA-BRCA/Human__TCGA_BRCA__MS__Clinical__Clinical__01_28_2016__BI__Clinical__Firehose.tsi",
   RNAseq_ga    = "https://linkedomics.org/data_download/TCGA-BRCA/Human__TCGA_BRCA__UNC__RNAseq__GA_RNA__01_28_2016__BI__Gene__Firehose_RSEM_log2.cct.gz",
   CNV          = "https://linkedomics.org/data_download/TCGA-BRCA/Human__TCGA_BRCA__BI__SCNA__SNP_6.0__01_28_2016__BI__Gene__Firehose_GISTIC2.cct.gz",
   RPPA         = "https://linkedomics.org/data_download/TCGA-BRCA/Human__TCGA_BRCA__MDA__RPPA__MDA_RPPA__01_28_2016__BI__Gene__Firehose_RPPA.cct",
@@ -140,18 +140,6 @@ str(Y, max.level = 1)
 na_check <- sapply(Y, function(mat) any(is.na(mat)))
 print(na_check)
 
-sum(is.na(Y[[m]]))
-dim(Y[[m]])
-
-# Confirm that everything is clean
-if (all(!na_check)) {
-  cat("✔ No missing values found in any omics matrix.\n")
-} else {
-  cat("⚠ Missing values found in:\n")
-  print(names(na_check)[na_check])
-}
-
-
 set.seed(99) 
 n <- nrow(Y[[1]])
 M <- length(Y)
@@ -170,17 +158,10 @@ for(m in 1:M){
 }
 k_max
 
-#s_Y_3 <- svd(Y_train[[3]])
-#plot(cumsum(s_Y_3$d^2)/sum(s_Y_3$d^2))
-#which(cumsum(s_Y_3$d^2)/sum(s_Y_3$d^2)>0.9)
-
-boxplot(colMeans(Y_train[[3]]))
-#k_max[3] <- 20
 
 subsample_index <- 1:100
 set.seed(123)
 ptm <- proc.time() 
-#k_max <- 50
 fit_fama_1 <- fit_FAMA(Y_train, clt_SE=T, posterior_SE=T, 
                        index_SE=subsample_index, k_max=k_max)
 fama_time <- proc.time() - ptm
@@ -220,10 +201,8 @@ ptm <- proc.time()
 mofa_fit_2 <- fit_MOFA(Y_train,  fable_fit_1$estRank + 5) 
 mofa_time_2 <- proc.time() - ptm
 mofa_time_2
-#save.image(file=paste0('application/results/oos_3.RData'))
 
-#load('application/results/oos_2.RData')
-# - preliminary oos experiments #################################################
+# - oos metrics #################################################
 fama_cov_all <- tcrossprod(do.call(rbind, fit_fama_1$Lambdas_hat))+
   diag(as.vector(do.call(c, fit_fama_1$sigmas_sq_hat)))
 fable_cov_all <- fable_fit_1$FABLEPostMean
@@ -311,8 +290,16 @@ mofa_oos_lls_2_intra <- list()
 idx_start <- 1
 for(m in 1:M){
   print(m)
-  idx_m <- idx_start:(idx_start + ncol(Y_test[[m]])-1)
-  idx_start <- idx_start + ncol(Y_test[[m]])
+  idx_m <- 1:4000
+  if(m==2){
+    idx_m <- 4001:8000
+  }
+  if(m==3){
+    idx_m <- 8001:(8001+167)
+  }
+  if(m==4){
+    idx_m <- (8169): (8169+3999)
+  }
   fama_cov_m <- fama_cov_all[idx_m, idx_m]
   fable_cov_m <- fable_cov_all[idx_m, idx_m]
   rotate_cov_m <- rotate_cov_all[idx_m, idx_m]
@@ -337,22 +324,22 @@ for(m in 1:M){
   print(m)
   print(sum(fama_oos_lls_intra[[m]]))
   print(sum(fable_oos_lls_intra[[m]]))
-  print(sum(rotate_oos_lls_intra[[m]]))
-  print(sum(rotate_oos_lls_2_intra[[m]]))
   print(sum(mofa_oos_lls_intra[[m]]))
   print(sum(mofa_oos_lls_2_intra[[m]]))
-  
+  print(sum(rotate_oos_lls_intra[[m]]))
+  print(sum(rotate_oos_lls_2_intra[[m]]))
   if(test){
     test.1 <- t.test(fama_oos_lls_intra[[m]], fable_oos_lls_intra[[m]], alternative='greater', paired=TRUE)
-    print(test.1$p.value)
-    test.1 <- t.test(fama_oos_lls_intra[[m]], rotate_oos_lls_intra[[m]], alternative='greater', paired=TRUE)
-    print(test.1$p.value)
-    test.1 <- t.test(fama_oos_lls_intra[[m]], rotate_oos_lls_2_intra[[m]], alternative='greater', paired=TRUE)
     print(test.1$p.value)
     test.1 <- t.test(fama_oos_lls_intra[[m]], mofa_oos_lls_intra[[m]], alternative='greater', paired=TRUE)
     print(test.1$p.value)
     test.1 <- t.test(fama_oos_lls_intra[[m]], mofa_oos_lls_2_intra[[m]], alternative='greater', paired=TRUE)
     print(test.1$p.value)
+    test.1 <- t.test(fama_oos_lls_intra[[m]], rotate_oos_lls_intra[[m]], alternative='greater', paired=TRUE)
+    print(test.1$p.value)
+    test.1 <- t.test(fama_oos_lls_intra[[m]], rotate_oos_lls_2_intra[[m]], alternative='greater', paired=TRUE)
+    print(test.1$p.value)
+    
   }
 }
 
@@ -369,8 +356,17 @@ p_s <- sapply(Y, ncol)
 idx_start <- 1
 for(m in 1:(M-1)){
   print(m)
-  idx_m <- idx_start:(idx_start + ncol(Y_test[[m]])-1)
-  idx_start <- idx_start + ncol(Y_test[[m]])
+  print(m)
+  idx_m <- 1:4000
+  if(m==2){
+    idx_m <- 4001:8000
+  }
+  if(m==3){
+    idx_m <- 8001:(8001+167)
+  }
+  if(m==4){
+    idx_m <- (8169): (8169+3999)
+  }
   fama_oos_lls_inter[[m]] <- list()
   fable_oos_lls_inter[[m]] <- list()
   rotate_oos_lls_inter[[m]] <- list()
@@ -380,7 +376,16 @@ for(m in 1:(M-1)){
 
   for(v in (m+1):M){
     print(v)
-    idx_v <- sum(p_s[1:(v-1)]):sum(p_s[1:(v)])
+    idx_v <- 1:4000
+    if(v==2){
+      idx_v <- 4001:8000
+    }
+    if(v==3){
+      idx_v <- 8001:(8001+167)
+    }
+    if(v==4){
+      idx_v <- (8169): (8169+3999)
+    }
     idx_tot <- c(idx_m, idx_v) 
     fama_cov_m <- fama_cov_all[idx_tot, idx_tot]
     fable_cov_m <- fable_cov_all[idx_tot, idx_tot]
@@ -407,17 +412,14 @@ for(m in 1:(M-1)){
 
 for(m in 1:(M-1)){
   print(m)
-  
-  
   for(v in (m+1):M){
     print(v)
     print(sum(fama_oos_lls_inter[[m]][[v]]))
     print(sum(fable_oos_lls_inter[[m]][[v]]))
-    print(sum(rotate_oos_lls_inter[[m]][[v]]))
-    print(sum(rotate_oos_lls_2_inter[[m]][[v]]))
     print(sum(mofa_oos_lls_inter[[m]][[v]]))
     print(sum(mofa_oos_lls_2_inter[[m]][[v]]))
-    
+    print(sum(rotate_oos_lls_inter[[m]][[v]]))
+    print(sum(rotate_oos_lls_2_inter[[m]][[v]]))
     if(test){
       if(any(fama_oos_lls_inter[[m]][[v]] == -Inf)){
         print('fama - inf')
@@ -431,20 +433,7 @@ for(m in 1:(M-1)){
           print(test.1$p.value)
         }
         
-        if(any(rotate_oos_lls_inter[[m]][[v]] == -Inf)) {
-          print('rotate - inf')
-        }
-        else{
-          test.1 <- t.test(fama_oos_lls_inter[[m]][[v]], rotate_oos_lls_inter[[m]][[v]], alternative='greater', paired=TRUE)
-          print(test.1$p.value)
-        }
-        if(any(rotate_oos_lls_2_inter[[m]][[v]] == -Inf)) {
-          print('rotate 2 - inf')
-        }
-        else{
-          test.1 <- t.test(fama_oos_lls_inter[[m]][[v]], rotate_oos_lls_2_inter[[m]][[v]], alternative='greater', paired=TRUE)
-          print(test.1$p.value)
-        }
+        
         if(any(mofa_oos_lls_inter[[m]][[v]] == -Inf)) {
           print('mofa - inf')
         }
@@ -459,13 +448,22 @@ for(m in 1:(M-1)){
           test.1 <- t.test(fama_oos_lls_inter[[m]][[v]], mofa_oos_lls_2_inter[[m]][[v]], alternative='greater', paired=TRUE)
           print(test.1$p.value)
         }
-        
+          if(any(rotate_oos_lls_inter[[m]][[v]] == -Inf)) {
+            print('rotate - inf')
+          }
+          else{
+            test.1 <- t.test(fama_oos_lls_inter[[m]][[v]], rotate_oos_lls_inter[[m]][[v]], alternative='greater', paired=TRUE)
+            print(test.1$p.value)
+          }
+          if(any(rotate_oos_lls_2_inter[[m]][[v]] == -Inf)) {
+            print('rotate 2 - inf')
+          }
+          else{
+            test.1 <- t.test(fama_oos_lls_inter[[m]][[v]], rotate_oos_lls_2_inter[[m]][[v]], alternative='greater', paired=TRUE)
+            print(test.1$p.value)
+          }
       }
     }
   }
   
 }
-
-
-
-
