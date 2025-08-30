@@ -11,26 +11,8 @@ library(truncnorm)
 
 n_sim <- 50
 
-# scenario 1 (unbalanced)
-scenario <- 2
-if(scenario == 1 | scenario == 2){
-  k <- 30
-  k_1 <- 15
-  M <- 4
-  k_tildes <- rep(k_1, M)
-  p_s <- rep(2000, M)
-  sigmas <- c(1, 0.5, 0.5, 0.5)
-  sigmas_l <- rep(5, M)
-  sigmas_u <- rep(10, M)
-  n <- 500
-  if(scenario == 2){
-    n <- 1000
-  }
-}
-
-
-scenario <- 11
-if(scenario == 3 | scenario == 4 | scenario == 11){
+scenario <- 1
+if(scenario == 1 | scenario == 2 ){
   k <- 30
   k_1 <- 20
   M <- 4
@@ -40,32 +22,13 @@ if(scenario == 3 | scenario == 4 | scenario == 11){
   sigmas_l <- rep(5, M)
   sigmas_u <- rep(10, M)
   n <- 500
-  if(scenario == 4){
-    n <- 1000
-  }
-  if(scenario == 11){
-    n <- 150
-  }
-}
-
-
-if(scenario == 5 | scenario == 6){
-  k <- 30
-  k_1 <- 20
-  M <- 4
-  k_tildes <- rep(k_1, M)
-  p_s <- rep(1000, M)
-  sigmas <- rep(0.5, M)
-  sigmas_l <- rep(5, M)
-  sigmas_u <- rep(10, M)
-  n <- 500
-  if(scenario == 6){
+  if(scenario == 2){
     n <- 1000
   }
 }
 
-scenario <- 9
-if(scenario == 7 | scenario == 8 | scenario == 9){
+
+if(scenario == 3 | scenario == 4){
   k <- 30
   k_1 <- 20
   M <- 4
@@ -75,11 +38,8 @@ if(scenario == 7 | scenario == 8 | scenario == 9){
   sigmas_l <- rep(5, M)
   sigmas_u <- rep(10, M)
   n <- 500
-  if(scenario == 8){
+  if(scenario == 4){
     n <- 1000
-  }
-  if(scenario == 9){
-    n <- 150
   }
 }
 
@@ -196,14 +156,6 @@ library(ggplot2)
 library(purrr)
 library(patchwork)
 
-
-#scenario <- 8
-
-fama_results <- read.csv(paste0('simulations/results/scenario_', scenario, '/fama_results.csv'))
-fable_results <- read.csv(paste0('simulations/results/scenario_', scenario, '/fable_results.csv'))
-rotate_results <- read.csv(paste0('simulations/results/scenario_', scenario, '/rotate_results.csv'))
-mofa_results <- read.csv(paste0('simulations/results/scenario_', scenario, '/mofa_results.csv'))
-
 fama_results <- fama_results %>% mutate(method = "FAMA")
 fable_results <- fable_results %>% mutate(method = "FABLE")
 mofa_results <- mofa_results %>% mutate(method = "MOFA")
@@ -211,7 +163,6 @@ rotate_results <- rotate_results %>% mutate(method = "ROTATE")
 
 all_results <- bind_rows(fama_results, fable_results, mofa_results, rotate_results)
 all_results$method <- factor(all_results$method, levels = c("FAMA", "FABLE", "MOFA", "ROTATE"))
-#all_results <- bind_rows(fama_results, fable_results, rotate_results)
 
 
 p1 <- ggplot(all_results, aes(x = method, y = rmse_all, fill = method)) +
@@ -227,7 +178,7 @@ intra_data <- all_results %>%
 p2 <- ggplot(intra_data, aes(x = method, y = value, fill = method)) +
   geom_boxplot(position = position_dodge()) +
   theme_minimal() +
-  labs(title = "RMSEs Intraview", x = "Method", y = "RMSE") +
+  labs(title = "RMSEs Intra-view", x = "Method", y = "RMSE") +
   theme(legend.position = "none")
 
 inter_data <- all_results %>%
@@ -237,7 +188,7 @@ inter_data <- all_results %>%
 p3 <- ggplot(inter_data, aes(x = method, y = value, fill = method)) +
   geom_boxplot(position = position_dodge()) +
   theme_minimal() +
-  labs(title = "RMSEs Interview", x = "Method", y = "RMSE") +
+  labs(title = "RMSEs Inter-view", x = "Method", y = "RMSE") +
   theme(legend.position = "none")
 
 p4 <- ggplot(all_results, aes(x = method, y = time_pe, fill = method)) +
@@ -251,8 +202,6 @@ dev.new()
 (p1 / p2 / p3 / p4) + plot_layout(ncol = 4)
 
 
-
-write.csv(all_results, paste0('simulations/results/scenario_', scenario, '/all_results.csv'))
 
 rbind(colMeans(fama_results[ , grepl("len", names(fama_results))]),
 rep(colMeans(fable_results[ , grepl("len", names(fable_results))]),2))
@@ -289,46 +238,3 @@ coverage_fable_inter <- coverage_fable[ , grepl("inter", names(coverage_fable))]
 mean(colMeans(coverage_fama_clt_inter));
 mean(colMeans(coverage_fama_bvm_inter));
 mean(colMeans(coverage_fable_inter))
-
-
-scenario
-mean(colMeans(coverage_fama_clt_intra));
-mean(colMeans(coverage_fama_bvm_intra));
-mean(colMeans(coverage_fable_intra));
-mean(colMeans(coverage_fama_clt_inter));
-mean(colMeans(coverage_fama_bvm_inter));
-mean(colMeans(coverage_fable_inter))
-
-# to do
-
-# scenario 3
-# coverage + plot
-
-# scenario 4
-# run mofa
-# plot
-
-# scenario 7
-# run mofa
-# coverage + plot
-
-# scenario 8
-# run mofa
-# plot
-
-
-# scenario 5
-# run mofa
-# coverage + plot
-
-# scenario 6
-# all
-
-# scenario 9
-# all
-
-# scenario 10
-# all
-
-
-
